@@ -1,0 +1,47 @@
+set Dimension = 3
+set Output directory = output
+set End time         = 3.15e14
+set Maximum time step = 3.15e12
+
+set Output format = vtu
+set Visualization frequency = 1
+
+set Initial refinement = 6
+set Maximum refinement = 6
+set Minimum refinement = 6
+
+set CFL = 1.0
+set Use direct solver = false
+set Linear solver tolerance = 1e-12
+set Picard tolerance = 1e-12
+
+set Pi = 1.0
+set gamma = 1.0
+
+set L = 1000e3
+set Gravity = 9.8
+set Density of mantle = 3300
+set Density of crust = 2670
+set Density of overburden = 2880
+set Initial crustal thickness = 5e3
+
+subsection Sill thickness function
+  set Variable names = x, y, z, t
+  #set Function constants = P0=32e6, L0=25e3, eps0=3e-11, eta0=1e18
+  set Function constants = v=0.1, dsdt = 0.002, smoother=15e3
+  set Function expression = (5e3*2500/(2880-2675) + 17e3) * min(1.0, erfc((sqrt((x-v*t/3.15e7-50e3-smoother)^2+(y-500e3)^2)-50e3)/smoother)/2 + erfc((sqrt((y-500e3)^2)-50e3)/smoother)*erfc((x-v*t/3.15e7-50e3-smoother)/smoother)*erfc((smoother-x)/smoother)*erfc((x-1e6+smoother)/smoother)/16)
+end
+subsection Rigidity function
+  set Function expression = 7e10*12e3^3 / (12 * (1.0 - 0.25^2))
+end
+
+subsection Crustal viscosity function
+  set Function expression = 1e20
+end
+
+subsection Sill emplacement function
+  set Variable names = x, y, z, t
+  set Function constants = v=0.1, dsdt = 0.002, P0 = 32e6, h0=1e3, L0 = 25e3, eps0=3e-11, eta0=1e18
+  set Function expression = 0
+  # if (t<2e6*3.15e7*eps0, dsdt/3.15e7/(h0*eps0) * erfc((((x-1000e3/L0)^2)-(50e3/L0)^2)/(50e3/L0))/2, 0)
+end
