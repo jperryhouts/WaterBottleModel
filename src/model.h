@@ -77,7 +77,7 @@
 
 #include <deal.II/base/parsed_function.h>
 
-constexpr double year_in_seconds = 60*60*24*365.2425;
+constexpr double YEAR_IN_SECONDS = 60*60*24*365.2425;
 
 namespace LA
 {
@@ -208,15 +208,15 @@ class CrustalFlow
     double picard_tolerance;
     std::string output_format;
     double CFL;
-    double L;
-    unsigned int refinement, min_refinement, max_refinement;
+    double model_width;
+    unsigned int initial_refinement, min_refinement, max_refinement;
     bool initialization_step;
     unsigned int vis_frequency;
     unsigned int max_nonlinear_iterations;
     double end_time;
 
     bool unit_testing;
-    double N;
+    double test_perturbation_freq;
 
     /**
      * A function object representing the effective elastic thickness.

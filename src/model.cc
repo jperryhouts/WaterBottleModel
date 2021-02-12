@@ -506,7 +506,7 @@ assemble_system(const double dt)
 
               if (unit_testing)
                 {
-                  const double omega = N*dealii::numbers::PI/L;
+                  const double omega = test_perturbation_freq*dealii::numbers::PI/model_width;
                   const double X = loc[0];
                   sigma = -(0.7 + (0.1*(std::pow(omega,4.0) + 1)*std::sin(omega*X)));
                   //grad_w_bar[0] = 0.1*omega*std::cos(omega*X);
@@ -654,7 +654,7 @@ solve_direct ()
         const double w_residual = picard_residual(distributed_solution,
                                                   w_extractor, flexure_degree+1);
 
-        const double residual_norm = (h_residual+w_residual)/(std::pow(L,spacedim-1));
+        const double residual_norm = (h_residual+w_residual)/(std::pow(model_width,spacedim-1));
 
         if (residual_norm <= picard_tolerance) {
           old_locally_relevant_solution = locally_relevant_solution;
@@ -710,7 +710,7 @@ solve_iterative ()
         const double w_residual = picard_residual(distributed_solution,
                                                   w_extractor, flexure_degree+1);
 
-        const double residual_norm = (h_residual+w_residual)/(std::pow(L,spacedim-1));
+        const double residual_norm = (h_residual+w_residual)/(std::pow(model_width,spacedim-1));
 
         if (residual_norm <= picard_tolerance) {
           old_locally_relevant_solution = locally_relevant_solution;
@@ -951,7 +951,7 @@ output_results (const unsigned int timestep,
                 output << " " << w_values[q] << " " << h_values[q]
                        << " " << s_values[q];
                 // if (unit_testing)
-                //     output << " " << h_values[q]-h_0-0.01/3.0*time*std::sin(N*dealii::numbers::PI*loc[0]/L);
+                //     output << " " << h_values[q]-h_0-0.01/3.0*time*std::sin(test_perturbation_freq*dealii::numbers::PI*loc[0]/model_width);
                 output << "\n";
               }
             }
@@ -991,7 +991,7 @@ output_results (const unsigned int timestep,
             const Point<spacedim> loc = fe_values.quadrature_point (q);
             const double X = loc[0];
 
-            const double omega = N*dealii::numbers::PI/L;
+            const double omega = test_perturbation_freq*dealii::numbers::PI/model_width;
             const double exact_w = 0.1*std::sin(omega*X) + 1.0;
             const double exact_u = 0.015*(omega)/(omega*omega + 2)*std::cos(omega*X);
             const double exact_h = h_0 + crustal_flow_time * 2.0/3.0*h_0
@@ -1045,16 +1045,19 @@ run ()
     initialization_step = true;
     vis_timestep = 0;
 
-    GridGenerator::hyper_cube(surface_mesh, 0, L, false);
-    surface_mesh.refine_global(refinement);
+    GridGenerator::hyper_cube(surface_mesh, 0, model_width, false);
+    surface_mesh.refine_global(initial_refinement);
     setup_dofs ();
     //apply_initial_conditions ();
+
+    if (Utilities::MPI::this_mpi_process(MPI_COMM) == 0)
+      pcout << "\nInitializing model" << std::endl;
 
     for (unsigned int i=0; i<(max_refinement-min_refinement); ++i)
       {
         if (Utilities::MPI::this_mpi_process(MPI_COMM) == 0)
           {
-            pcout << "Initial refinement step "
+            pcout << "\nInitial refinement step "
               << Utilities::int_to_string(i+1) << " of "
               << Utilities::int_to_string(max_refinement-min_refinement)
               << std::endl;
@@ -1096,7 +1099,7 @@ run ()
                                                     solve_iterative();
               h_residuals.push_back(res.first);
               w_residuals.push_back(res.second);
-              residual_norm = (res.first+res.second)/(std::pow(L,spacedim-1));
+              residual_norm = (res.first+res.second)/(std::pow(model_width,spacedim-1));
             }
           while (residual_norm > picard_tolerance
                  && h_residuals.size() < max_nonlinear_iterations);
@@ -1143,7 +1146,7 @@ run ()
           if (crustal_flow_timestep % vis_frequency == 0)
             {
               output_results(vis_timestep++,
-                             crustal_flow_time/year_in_seconds);
+                             crustal_flow_time/YEAR_IN_SECONDS);
             }
         }
       while (crustal_flow_time < end_time);

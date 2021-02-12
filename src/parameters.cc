@@ -161,20 +161,21 @@ template <int spacedim>
 void
 declare_parameters (dealii::ParameterHandler &prm)
   {
+    prm.declare_entry ("Unit testing", "false", Patterns::Bool(), "");
+    prm.declare_entry ("Test perturbation frequency", "2",   Patterns::Integer(1), "");
+
     prm.declare_entry ("Dimension", "2", Patterns::Integer(0), "");
     prm.declare_entry ("Output directory", "output", Patterns::DirectoryName(), "");
     prm.declare_entry ("End time", "1e10", Patterns::Double(0), "");
     prm.declare_entry ("Maximum time step", "1e10", Patterns::Double(0), "");
 
-    prm.declare_entry ("L", "1.0", Patterns::Double(0), "");
-    prm.declare_entry ("Unit testing", "false", Patterns::Bool(), "");
+    prm.declare_entry ("Model width", "1.0", Patterns::Double(0), "");
     prm.declare_entry ("Output format", "vtu", Patterns::Selection("vtu|ascii|none"), "");
 
     prm.declare_entry ("CFL", "0.1", Patterns::Double(0), "");
     prm.declare_entry ("Use direct solver", "false", Patterns::Bool(), "");
     prm.declare_entry ("Linear solver tolerance", "1e-12", Patterns::Double(0), "");
     prm.declare_entry ("Picard tolerance", "1e-12", Patterns::Double(0), "");
-    prm.declare_entry ("N", "2",   Patterns::Integer(1), "");
     prm.declare_entry ("Initial refinement", "4", Patterns::Integer(0), "");
     prm.declare_entry ("Minimum refinement", "3", Patterns::Integer(0), "");
     prm.declare_entry ("Maximum refinement", "6", Patterns::Integer(0), "");
@@ -264,20 +265,21 @@ parse_parameters (dealii::ParameterHandler &prm,
     model.solver_relative_tolerance = prm.get_double("Linear solver tolerance");
     model.picard_tolerance = prm.get_double("Picard tolerance");
 
-    model.unit_testing = prm.get_bool("Unit testing");
     model.output_format = prm.get("Output format");
-    model.L = prm.get_double("L");
-    model.N = prm.get_integer("N");
+    model.model_width = prm.get_double("Model width");
+
+    model.unit_testing = prm.get_bool("Unit testing");
     if (model.unit_testing)
     {
       model.h_0 = 1.0;
       model.w_0 = 1.0;
       model.gravity = 1.0;
+      model.test_perturbation_freq = prm.get_integer("Test perturbation frequency");
     }
 
     model.CFL = prm.get_double("CFL");
     model.use_direct_solver = prm.get_bool("Use direct solver");
-    model.refinement = prm.get_integer("Initial refinement");
+    model.initial_refinement = prm.get_integer("Initial refinement");
     model.min_refinement = prm.get_integer("Minimum refinement");
     model.max_refinement = prm.get_integer("Maximum refinement");
     AssertThrow(model.max_refinement >= model.min_refinement,

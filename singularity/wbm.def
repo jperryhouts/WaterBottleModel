@@ -1,0 +1,22 @@
+Bootstrap: localimage
+From: dealii.sif
+
+## For IU cluster using Singularity 3.6.4
+
+%files
+    /home/jmp/Documents/workspace/WaterBottleModel/src/ /opt/wbm/
+
+%post
+    mkdir -p /opt/wbm && cd /opt/wbm
+    cmake -DCMAKE_BUILD_TYPE=Release src/
+    make -j4
+
+%environment
+    export PATH=/opt/wbm:$PATH
+
+%runscript
+    exec /opt/wbm/wbm "${@}"
+
+%labels
+    Author Jonathan Perry-Houts <jperryh2@uoregon.edu>
+    Version 0.1.0
