@@ -406,7 +406,7 @@ assemble_system(const double dt)
     std::vector<double> old_s_values (n_q_points);
 
     Point<spacedim> loc;
-    double D, eta, h_bar, h_n, s_n, sigma, emplacement = 0;
+    double D, sigma, eta, h_bar, h_n=0, s_n=0, emplacement = 0;
     Tensor<1,spacedim> grad_w_bar;
 
     for (const auto &cell : dof_handler.active_cell_iterators())
