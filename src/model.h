@@ -77,11 +77,15 @@
 
 #include <deal.II/base/parsed_function.h>
 
+#include "field_initializer.h"
+#include "postprocess_vis.h"
+
 constexpr double YEAR_IN_SECONDS = 60*60*24*365.2425;
 
 namespace LA
 {
   using namespace dealii::LinearAlgebraTrilinos;
+  //using namespace dealii::TrilinosWrappers;
 }
 
 using namespace dealii;
@@ -161,10 +165,11 @@ class CrustalFlow
     IndexSet locally_owned_dofs;
     IndexSet locally_relevant_dofs;
 
-    LA::MPI::SparseMatrix system_matrix;
-    LA::MPI::Vector locally_relevant_solution;
-    LA::MPI::Vector old_locally_relevant_solution;
-    LA::MPI::Vector rhs;
+    TrilinosWrappers::SparseMatrix system_matrix;
+    TrilinosWrappers::MPI::Vector locally_relevant_solution;
+    TrilinosWrappers::MPI::Vector old_locally_relevant_solution;
+    TrilinosWrappers::MPI::Vector tmp_locally_relevant_solution;
+    TrilinosWrappers::MPI::Vector rhs;
 
     const FEValuesExtractors::Vector u_extractor;
     const FEValuesExtractors::Scalar h_extractor;
@@ -183,9 +188,11 @@ class CrustalFlow
     std::pair<double, double> solve_direct ();
     std::pair<double, double> solve_iterative ();
     std::pair<double, double> solve_bicgstab ();
-    double picard_residual (const LA::MPI::Vector &distributed_solution,
-                            const FEValuesExtractors::Scalar extractor,
-                            const unsigned int degree);
+
+    std::pair<double, double>
+    picard_residuals (const TrilinosWrappers::MPI::Vector &old_solution,
+                      const TrilinosWrappers::MPI::Vector &new_solution);
+
     double get_dt (const double max_dt);
     void print_step_header(const double timestep,
                            const double time);
@@ -202,7 +209,18 @@ class CrustalFlow
     double E=7e11, Te=10e3, nu=0.25;
     double RIGIDITY=((E * std::pow(Te, 3)) / (12 * (1.0 - nu *nu)));
     unsigned int vis_timestep;
-    double w_0, h_0; // Initial condition (and boundary condition)
+
+    // Initial conditions (and boundary conditions)
+    FieldInitializer<spacedim> initial_crustal_thickness_field;
+    FieldInitializer<spacedim> topographic_boundary_value_field;
+    FieldInitializer<spacedim> prescribed_overburden_field;
+    bool use_prescribed_overburden;
+    FieldInitializer<spacedim> rigidity_field; // Effective elastic thickness
+    FieldInitializer<spacedim> viscosity_field;
+    FieldInitializer<spacedim> initial_sill_thickness_field;
+    FieldInitializer<spacedim> sill_emplacement_field;
+    // Functions::PrescribedFunction<spacedim> sill_emplacement_function;
+
     bool use_direct_solver;
     double solver_relative_tolerance;
     double picard_tolerance;
@@ -218,14 +236,6 @@ class CrustalFlow
     bool unit_testing;
     double test_perturbation_freq;
 
-    /**
-     * A function object representing the effective elastic thickness.
-     */
-    Functions::ParsedFunction<spacedim> rigidity_function;
-    Functions::ParsedFunction<spacedim> viscosity_function;
-    Functions::ParsedFunction<spacedim> sill_emplacement_function;
-    Functions::ParsedFunction<spacedim> sill_thickness_function;
-    Functions::ParsedFunction<spacedim> initial_crustal_thickness_function;
     /**
      * The coordinate representation to evaluate the function. Possible
      * choices are depth, cartesian and spherical.

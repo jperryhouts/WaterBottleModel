@@ -16,20 +16,6 @@
 
 #include "parameters.h"
 
-std::string
-read_until_end (std::istream &input)
-{
-  std::string result;
-  while (input)
-    {
-      std::string line;
-      std::getline(input, line);
-
-      result += line + '\n';
-    }
-  return result;
-}
-
 // get the value of a particular parameter from the contents of the input
 // file. return an empty string if not found
 std::string
@@ -161,27 +147,98 @@ template <int spacedim>
 void
 declare_parameters (dealii::ParameterHandler &prm)
   {
+    //
+    // Debug / testing parameters
+    //
+
     prm.declare_entry ("Unit testing", "false", Patterns::Bool(), "");
     prm.declare_entry ("Test perturbation frequency", "2",   Patterns::Integer(1), "");
 
-    prm.declare_entry ("Dimension", "2", Patterns::Integer(0), "");
-    prm.declare_entry ("Output directory", "output", Patterns::DirectoryName(), "");
-    prm.declare_entry ("End time", "1e10", Patterns::Double(0), "");
+    //
+    // I/O parameters
+    //
+
+    prm.declare_entry ("Output directory", "output", Patterns::DirectoryName(),
+                       "All model results and logs will be written to files "
+                       "in this directory");
+    prm.declare_entry ("Output format", "vtu", Patterns::Selection("vtu|ascii|none"),
+                       "File format for model visualization outputs.");
+
+    //
+    // Model setup parameters
+    //
+
+    prm.declare_entry ("Dimension", "2", Patterns::Integer(0),
+                       "Override with --dimension flag.");
+
+    prm.declare_entry ("End time", "1e10", Patterns::Double(0),
+                       "Override with --end-time flag.");
     prm.declare_entry ("Maximum time step", "1e10", Patterns::Double(0), "");
 
     prm.declare_entry ("Model width", "1.0", Patterns::Double(0), "");
-    prm.declare_entry ("Output format", "vtu", Patterns::Selection("vtu|ascii|none"), "");
+
+    prm.declare_entry ("Initial refinement", "4", Patterns::Integer(0),
+                       "Override with --refinement flag.");
+    prm.declare_entry ("Minimum refinement", "3", Patterns::Integer(0), "");
+    prm.declare_entry ("Maximum refinement", "6", Patterns::Integer(0), "");
+
+    prm.declare_entry ("Visualization frequency", "10", Patterns::Integer(0), "");
+
+    //
+    // Solver paramters
+    //
 
     prm.declare_entry ("CFL", "0.1", Patterns::Double(0), "");
     prm.declare_entry ("Use direct solver", "false", Patterns::Bool(), "");
     prm.declare_entry ("Linear solver tolerance", "1e-12", Patterns::Double(0), "");
     prm.declare_entry ("Picard tolerance", "1e-12", Patterns::Double(0), "");
-    prm.declare_entry ("Initial refinement", "4", Patterns::Integer(0), "");
-    prm.declare_entry ("Minimum refinement", "3", Patterns::Integer(0), "");
-    prm.declare_entry ("Maximum refinement", "6", Patterns::Integer(0), "");
-    prm.declare_entry ("Visualization frequency", "10", Patterns::Integer(0), "");
-    prm.declare_entry ("Initial crustal thickness", "1e3", Patterns::Double(0), "");
     prm.declare_entry ("Max nonlinear iterations", "50", Patterns::Integer(0), "");
+
+    //
+    // Initial/boundary conditions
+    //
+
+    prm.enter_subsection("Initial crustal thickness");
+    { // Units: meeters
+      FieldInitializer<spacedim>::declare_parameters(prm, "1e3");
+    }
+    prm.leave_subsection();
+
+    prm.declare_entry ("Use prescribed overburden", "false", Patterns::Bool(),
+                       "If set to false, the overburden (\\sigma) will be calculated "
+                       "based on the thickness of a mid-crustal sill. The sill is "
+                       "created over time through the \"emplacement\" parameters. "
+                       "If this value is set to true, then the overburden will be "
+                       "prescribed from whatever data source is defined in the "
+                       "\"Prescribed overburden\" subsection.");
+
+    prm.enter_subsection("Prescribed overburden");
+    { // Units: Pascals
+      FieldInitializer<spacedim>::declare_parameters(prm, "500e6");
+    }
+    prm.leave_subsection();
+
+    prm.enter_subsection("Topographic boundary conditions");
+    { // Units: meters
+      FieldInitializer<spacedim>::declare_parameters(prm, "0");
+    }
+    prm.leave_subsection();
+
+    //
+    // Physical paramters
+    //
+
+    prm.enter_subsection("Rigidity");
+    {
+      FieldInitializer<spacedim>::declare_parameters(prm, "0");
+    }
+    prm.leave_subsection();
+
+    prm.enter_subsection("Viscosity");
+    {
+      FieldInitializer<spacedim>::declare_parameters(prm, "1e20");
+    }
+    prm.leave_subsection();
 
     prm.declare_entry ("Gravity", "9.8", Patterns::Double(0), "");
 
@@ -214,27 +271,19 @@ declare_parameters (dealii::ParameterHandler &prm)
                        "parameter is non-zero, which is interpreted to "
                        "be the depth of the point.");
 
-    prm.enter_subsection("Rigidity function");
+    //
+    // Application-specific parameters
+    //
+
+    prm.enter_subsection("Sill emplacement");
     {
-      Functions::ParsedFunction<spacedim>::declare_parameters (prm, 1);
+      FieldInitializer<spacedim>::declare_parameters (prm, "0.0");
     }
     prm.leave_subsection();
 
-    prm.enter_subsection("Crustal viscosity function");
+    prm.enter_subsection("Initial sill thickness");
     {
-      Functions::ParsedFunction<spacedim>::declare_parameters (prm, 1);
-    }
-    prm.leave_subsection();
-
-    prm.enter_subsection("Sill emplacement function");
-    {
-      Functions::ParsedFunction<spacedim>::declare_parameters (prm, 1);
-    }
-    prm.leave_subsection();
-
-    prm.enter_subsection("Sill thickness function");
-    {
-      Functions::ParsedFunction<spacedim>::declare_parameters (prm, 1);
+      FieldInitializer<spacedim>::declare_parameters (prm, "0.0");
     }
     prm.leave_subsection();
   }
@@ -259,8 +308,39 @@ parse_parameters (dealii::ParameterHandler &prm,
 
     model.gravity = prm.get_double("Gravity");
 
-    model.h_0 = prm.get_double("Initial crustal thickness");
-    model.w_0 = 2 * (model.rho_m-model.rho_c) * model.h_0 / model.rho_m; /* +(rho_m-rho_s)*S_0 */
+    prm.enter_subsection ("Initial crustal thickness");
+    {
+      try { model.initial_crustal_thickness_field.parse_parameters(prm); }
+      catch (...) {
+          std::cerr << "ERROR: FieldInitializer failed to parse\n"
+                    << "\t'Initial crustal thickness'\n";
+          throw;
+        }
+    }
+    prm.leave_subsection();
+
+    model.use_prescribed_overburden = prm.get_bool("Use prescribed overburden");
+    prm.enter_subsection ("Prescribed overburden");
+    {
+      try { model.prescribed_overburden_field.parse_parameters(prm); }
+      catch (...) {
+          std::cerr << "ERROR: FieldInitializer failed to parse\n"
+                    << "\t'Prescribed overburden'\n";
+          throw;
+        }
+    }
+    prm.leave_subsection();
+
+    prm.enter_subsection ("Topographic boundary conditions");
+    {
+      try { model.topographic_boundary_value_field.parse_parameters(prm); }
+      catch (...) {
+          std::cerr << "ERROR: FieldInitializer failed to parse\n"
+                    << "\t'Topographic boundary conditions'\n";
+          throw;
+        }
+    }
+    prm.leave_subsection();
 
     model.solver_relative_tolerance = prm.get_double("Linear solver tolerance");
     model.picard_tolerance = prm.get_double("Picard tolerance");
@@ -271,8 +351,8 @@ parse_parameters (dealii::ParameterHandler &prm,
     model.unit_testing = prm.get_bool("Unit testing");
     if (model.unit_testing)
     {
-      model.h_0 = 1.0;
-      model.w_0 = 1.0;
+      model.initial_crustal_thickness_field.initialize_constant_source (1.0);
+      model.topographic_boundary_value_field.initialize_constant_source (1.0);
       model.gravity = 1.0;
       model.test_perturbation_freq = prm.get_integer("Test perturbation frequency");
     }
@@ -297,77 +377,50 @@ parse_parameters (dealii::ParameterHandler &prm,
     //   Utilities::Coordinates::string_to_coordinate_system(
     //     prm.get("Coefficient functions coordinate system"));
 
-    prm.enter_subsection("Rigidity function");
+    prm.enter_subsection ("Rigidity");
     {
       try
-        {
-          model.rigidity_function.parse_parameters (prm);
-        }
-      catch (...)
-        {
-          std::cerr << "ERROR: FunctionParser failed to parse\n"
-                    << "\t'Postprocess.Crustal flow.Rigidity function'\n"
-                    << "with expression\n"
-                    << "\t'" << prm.get("Function expression") << "'\n"
-                    << "More information about the cause of the parse error \n"
-                    << "is shown below.\n";
+        { model.rigidity_field.parse_parameters(prm); }
+      catch (...) {
+          std::cerr << "ERROR: FieldInitializer failed to parse\n"
+                    << "\t'Rigidity'\n";
           throw;
         }
     }
     prm.leave_subsection();
 
-    prm.enter_subsection("Crustal viscosity function");
+    prm.enter_subsection ("Viscosity");
     {
       try
-        {
-          model.viscosity_function.parse_parameters (prm);
-        }
-      catch (...)
-        {
-          std::cerr << "ERROR: FunctionParser failed to parse\n"
-                    << "\t'Postprocess.Crustal flow.Crustal viscosity function'\n"
-                    << "with expression\n"
-                    << "\t'" << prm.get("Function expression") << "'"
-                    << "More information about the cause of the parse error \n"
-                    << "is shown below.\n";
+        { model.viscosity_field.parse_parameters(prm); }
+      catch (...) {
+          std::cerr << "ERROR: FieldInitializer failed to parse\n"
+                    << "\t'Viscosity'\n";
           throw;
         }
     }
     prm.leave_subsection();
 
-    prm.enter_subsection("Sill emplacement function");
+    prm.enter_subsection("Sill emplacement");
     {
       try
-        {
-          model.sill_emplacement_function.parse_parameters (prm);
-        }
-      catch (...)
-        {
-          std::cerr << "ERROR: FunctionParser failed to parse\n"
-                    << "\t'Postprocess.Crustal flow.Sill emplacement function'\n"
-                    << "with expression\n"
-                    << "\t'" << prm.get("Function expression") << "'"
-                    << "More information about the cause of the parse error \n"
-                    << "is shown below.\n";
+        { model.sill_emplacement_field.parse_parameters (prm); }
+      catch (...) {
+          std::cerr << "ERROR: FieldInitializer failed to parse\n"
+                    << "\t'Viscosity'\n";
           throw;
         }
     }
     prm.leave_subsection();
 
-    prm.enter_subsection("Sill thickness function");
+    prm.enter_subsection("Initial sill thickness");
     {
       try
-        {
-          model.sill_thickness_function.parse_parameters (prm);
-        }
+        { model.initial_sill_thickness_field.parse_parameters (prm); }
       catch (...)
         {
-          std::cerr << "ERROR: FunctionParser failed to parse\n"
-                    << "\t'Postprocess.Crustal flow.Sill emplacement function'\n"
-                    << "with expression\n"
-                    << "\t'" << prm.get("Function expression") << "'"
-                    << "More information about the cause of the parse error \n"
-                    << "is shown below.\n";
+          std::cerr << "ERROR: FieldInitializer failed to parse\n"
+                    << "\t'Initial sill thickness function'\n";
           throw;
         }
     }

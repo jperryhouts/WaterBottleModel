@@ -14,14 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-#include "model.h"
-#include "parameters.h"
 #include "main.h"
-
-#include <deal.II/base/utilities.h>
-#include <deal.II/base/mpi.h>
-#include <deal.II/base/multithread_info.h>
-#include <deal.II/base/revision.h>
 
 template <int spacedim>
 void
@@ -45,15 +38,17 @@ run_model(const std::string &input_as_string)
         std::ofstream duplicate(model.output_directory + "original.prm");
         duplicate << input_as_string;
 
-        DIR *dir = opendir(model.output_directory.c_str());
+        const std::string solution_directory
+          = model.output_directory + "crustal_flow";
+        DIR *dir = opendir(solution_directory.c_str());
         if (dir == nullptr)
-          error = mkdirp (model.output_directory + "crustal_flow",
+          error = mkdirp (solution_directory,
                           S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH);
         else
           error = closedir(dir);
         MPI_Bcast (&error, 1, MPI_INT, 0, MPI_COMM_WORLD);
         AssertThrow(error == 0,
-                    ExcMessage(std::string("Can't create the output directory at <") + model.output_directory + ">"));
+                    ExcMessage(std::string("Can't create the output directory at <") + solution_directory + ">"));
 
         model.log_file_stream.open((model.output_directory + "log.txt").c_str(),
                                    std::ios_base::out);
@@ -77,15 +72,6 @@ main (int argc, char *argv[])
   bool do_print_license = false;
   bool do_print_help = false;
 
-  for (int i=0; i<argc; ++i)
-    {
-      const std::string arg = argv[i];
-      if (arg == "-h" || arg == "--help")
-        do_print_help = true;
-      else if (arg == "-l" || arg == "--license")
-        do_print_license = true;
-    }
-
   try
     {
       int n_mpi_args = 0;
@@ -107,15 +93,19 @@ main (int argc, char *argv[])
           return 0;
         }
 
-      // See where to read input from, then do the reading and
-      // put the contents of the input into a string.
-      const std::string parameter_file_name =
-        ((argc>=2) ? argv[argc-1] : "parameters.prm");
-      std::ifstream parameter_file(parameter_file_name.c_str());
-      const std::string input_as_string = read_until_end(parameter_file);
+      // Read the input parameter file to a string.
+      MPIAssertThrow(argc >= 2, "No input file specified");
+      const std::string parameter_file_name = argv[argc-1];
 
-      const std::string dimstr = get_last_value_of_parameter(input_as_string,
-                                                            "Dimension");
+      struct stat buffer;
+      MPIAssertThrow(stat (parameter_file_name.c_str(), &buffer) == 0,
+                     "Parameter file does not exist.");
+
+      const std::string input_as_string =
+        AsciiUtils::read_and_distribute_file_content(parameter_file_name);
+
+      const std::string dimstr =
+        get_last_value_of_parameter(input_as_string, "Dimension");
       const unsigned int dim = dealii::Utilities::string_to_int (dimstr);
 
       switch (dim)

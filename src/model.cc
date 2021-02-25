@@ -18,69 +18,43 @@
 
 template <int spacedim>
 CrustalFlow<spacedim>::CrustalFlow (const MPI_Comm mpi_communicator_)
-  :
-  MPI_COMM (Utilities::MPI::duplicate_communicator (mpi_communicator_)),
-  iostream_tee_device(std::cout, log_file_stream),
-  iostream_tee_stream(iostream_tee_device),
-  pcout (iostream_tee_stream,
-         (Utilities::MPI::this_mpi_process(MPI_COMM) == 0)),
-  computing_timer (MPI_COMM, pcout, TimerOutput::summary,
-      TimerOutput::wall_times),
-  output_directory(""),
-  surface_mesh (MPI_COMM,
-                     typename Triangulation<dim, spacedim>::MeshSmoothing (
-                       Triangulation<dim, spacedim>::smoothing_on_refinement
-                       | Triangulation<dim, spacedim>::smoothing_on_coarsening),
-                     parallel::distributed::Triangulation<dim, spacedim>::mesh_reconstruction_after_repartitioning),
-      mapping(flexure_degree), /* Use mapping degree consistent with equations, to accurately represent surface deformations. */
-      dof_handler (surface_mesh),
-      fe (FE_Q<dim, spacedim> (velocity_degree), spacedim /* Crustal flow velocity */,
-      FE_Q<dim, spacedim> (h_degree), 1 /* h -- Lower crustal thickness */,
-          FE_Q<dim, spacedim> (flexure_degree-1), 1 /* v -- Elastic plate laplacian */,
-          FE_Q<dim, spacedim> (flexure_degree), 1 /* w -- Elastic plate displacement */,
-          FE_Q<dim, spacedim> (s_degree), 1 /* s -- Overburden load */),
-      u_extractor (u_component_index),
-      h_extractor (h_component_index),
-      v_extractor (v_component_index),
-      w_extractor (w_component_index),
-      s_extractor (s_component_index),
-      rigidity_function (1),
-      viscosity_function (1),
-      sill_emplacement_function (1),
-      sill_thickness_function (1)
-  {
-  // { // Make time stamped output directory and initialize log.txt
-  //   output_directory = get_timestamp ();
-  //   int error;
-  //   if ((Utilities::MPI::this_mpi_process(MPI_COMM) == 0))
-  //     {
-  //       DIR *dir = opendir(output_directory.c_str());
-  //       if (dir == nullptr)
-  //         error = mkdirp (output_directory, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH);
-  //       else
-  //         error = closedir(dir);
-  //       MPI_Bcast (&error, 1, MPI_INT, 0, MPI_COMM);
-  //       AssertThrow(error == 0,
-  //                   ExcMessage(std::string("Can't create the output directory at <") + output_directory + ">"));
-  //
-  //       log_file_stream.open((output_directory + "/log.txt").c_str(), std::ios_base::out);
-  //
-  //       print_run_header(log_file_stream);
-  //     }
-  //   else
-  //     {
-  //       MPI_Bcast (&error, 1, MPI_INT, 0, MPI_COMM);
-  //       if (error!=0)
-  //         throw QuietException();
-  //     }
-  // }
-
-  // { // Make backup copy of parameter file
-  //   std::ifstream  src(input_file, std::ios::binary);
-  //   std::ofstream  dst(output_directory + "/original.prm", std::ios::binary);
-  //   dst << src.rdbuf();
-  // }
-  }
+  : MPI_COMM (Utilities::MPI::duplicate_communicator (mpi_communicator_)),
+    iostream_tee_device(std::cout, log_file_stream),
+    iostream_tee_stream(iostream_tee_device),
+    pcout (iostream_tee_stream,
+          (Utilities::MPI::this_mpi_process(MPI_COMM) == 0)),
+    computing_timer (MPI_COMM, pcout, TimerOutput::summary,
+        TimerOutput::wall_times),
+    output_directory(""),
+    surface_mesh (MPI_COMM,
+                      typename Triangulation<dim, spacedim>::MeshSmoothing (
+                        Triangulation<dim, spacedim>::smoothing_on_refinement
+                        | Triangulation<dim, spacedim>::smoothing_on_coarsening),
+                      parallel::distributed::Triangulation<dim, spacedim>::mesh_reconstruction_after_repartitioning),
+    mapping(flexure_degree), /* Use mapping degree consistent with equations, to accurately represent surface deformations. */
+    dof_handler (surface_mesh),
+    fe (FE_Q<dim, spacedim> (velocity_degree), spacedim /* Crustal flow velocity */,
+    FE_Q<dim, spacedim> (h_degree), 1 /* h -- Lower crustal thickness */,
+    FE_Q<dim, spacedim> (flexure_degree-1), 1 /* v -- Elastic plate laplacian */,
+    FE_Q<dim, spacedim> (flexure_degree), 1 /* w -- Elastic plate displacement */,
+    FE_Q<dim, spacedim> (s_degree), 1 /* s -- Sill thickness */),
+    u_extractor (u_component_index),
+    h_extractor (h_component_index),
+    v_extractor (v_component_index),
+    w_extractor (w_component_index),
+    s_extractor (s_component_index),
+    // All of the following are actually scalar fields, but the ones
+    // which are to be applied as boundary conditions need to have
+    // as many components as there are FE fields (even though all but)
+    // one will be masked when the function is actually evaluated).
+    initial_crustal_thickness_field (spacedim+4),
+    topographic_boundary_value_field (spacedim+4),
+    prescribed_overburden_field (1),
+    rigidity_field (1),
+    viscosity_field (1),
+    initial_sill_thickness_field (spacedim+4),
+    sill_emplacement_field (1)
+  {}
 
 template <int spacedim>
 CrustalFlow<spacedim>::~CrustalFlow ()
@@ -259,39 +233,38 @@ setup_dofs()
       constraints.reinit (locally_relevant_dofs);
       DoFTools::make_hanging_node_constraints (dof_handler, constraints);
 
-      VectorTools::interpolate_boundary_values (dof_handler, 0,
-                                                Functions::ConstantFunction<spacedim>(
-                                                  h_0, spacedim+4),
+      VectorTools::interpolate_boundary_values (dof_handler, 0, initial_crustal_thickness_field,
+                                                // Functions::ConstantFunction<spacedim>(
+                                                //    this->crustal_thickness_boundary_value, spacedim+4),
                                                 constraints,
                                                 fe.component_mask(h_extractor));
-      VectorTools::interpolate_boundary_values (dof_handler, 0,
-                                                Functions::ConstantFunction<spacedim>(
-                                                  w_0, spacedim+4),
+      VectorTools::interpolate_boundary_values (dof_handler, 0, this->topographic_boundary_value_field,
                                                 constraints,
                                                 fe.component_mask(w_extractor));
+      VectorTools::interpolate_boundary_values (dof_handler, 0, this->initial_sill_thickness_field,
+                                                constraints,
+                                                fe.component_mask(s_extractor));
       VectorTools::interpolate_boundary_values (dof_handler, 0,
                                                 Functions::ZeroFunction<spacedim>(spacedim+4),
                                                 constraints,
-                                                fe.component_mask(v_extractor)
-                                              | fe.component_mask(s_extractor));
+                                                fe.component_mask(v_extractor));
 
       if (spacedim == 2)
         { // Need to apply boundary conditions to both left and right edges if we're working in dim=1 (spacedim=2)
-          VectorTools::interpolate_boundary_values (dof_handler, 1,
-                                                    Functions::ConstantFunction<spacedim>(
-                                                      h_0, spacedim+4),
+          // In spacedim=3 all edges are treated with the same boundary_id.
+          VectorTools::interpolate_boundary_values (dof_handler, 1, this->initial_crustal_thickness_field,
                                                     constraints,
                                                     fe.component_mask(h_extractor));
-          VectorTools::interpolate_boundary_values (dof_handler, 1,
-                                                    Functions::ConstantFunction<spacedim>(
-                                                      w_0, spacedim+4),
+          VectorTools::interpolate_boundary_values (dof_handler, 1, this->topographic_boundary_value_field,
                                                     constraints,
                                                     fe.component_mask(w_extractor));
+          VectorTools::interpolate_boundary_values (dof_handler, 1, this->initial_sill_thickness_field,
+                                                    constraints,
+                                                    fe.component_mask(s_extractor));
           VectorTools::interpolate_boundary_values (dof_handler, 1,
                                                     Functions::ZeroFunction<spacedim>(spacedim+4),
                                                     constraints,
-                                                    fe.component_mask(v_extractor)
-                                                  | fe.component_mask(s_extractor));
+                                                    fe.component_mask(v_extractor));
         }
 
       std::vector<Point<spacedim>> constraint_locations;
@@ -322,9 +295,7 @@ setup_dofs()
         FEValues<dim,spacedim> fe_values(mapping, fe, quadrature, update_quadrature_points);
         std::vector<unsigned int> local_dof_indices(fe.dofs_per_cell);
 
-        typename DoFHandler<dim,spacedim>::active_cell_iterator
-          cell = dof_handler.begin_active(), endc = dof_handler.end();
-        for (; cell != endc; ++cell)
+        for (const auto &cell : dof_handler.active_cell_iterators())
           if (!cell->is_artificial()) //(cell->is_locally_owned())
           {
             fe_values.reinit(cell);
@@ -386,10 +357,9 @@ setup_dofs()
                            MPI_COMM);
 
       rhs.reinit (locally_owned_dofs, MPI_COMM);
-      locally_relevant_solution.reinit (locally_owned_dofs, locally_relevant_dofs,
-                                        MPI_COMM);
-      old_locally_relevant_solution.reinit (locally_owned_dofs, locally_relevant_dofs,
-                                            MPI_COMM);
+      locally_relevant_solution.reinit (locally_owned_dofs, locally_relevant_dofs, MPI_COMM);
+      old_locally_relevant_solution.reinit (locally_owned_dofs, locally_relevant_dofs, MPI_COMM);
+      tmp_locally_relevant_solution.reinit (locally_owned_dofs, locally_relevant_dofs, MPI_COMM);
     }
   }
 
@@ -435,14 +405,11 @@ assemble_system(const double dt)
     std::vector<double> old_h_values (n_q_points);
     std::vector<double> old_s_values (n_q_points);
 
-    // Don't even bother doing these at each quadrature point for now.
-    double D = rigidity_function.value(Point<spacedim>());
-    double eta = viscosity_function.value(Point<spacedim>());
+    Point<spacedim> loc;
+    double D, eta, h_bar, h_n, s_n, sigma, emplacement = 0;
+    Tensor<1,spacedim> grad_w_bar;
 
-    unsigned int cidx = 0;
-    typename DoFHandler<dim,spacedim>::active_cell_iterator cell =
-      dof_handler.begin_active(), endc = dof_handler.end();
-    for (; cell != endc; ++cell, ++cidx)
+    for (const auto &cell : dof_handler.active_cell_iterators())
       if (cell->is_locally_owned())
         {
           cell_matrix = 0;
@@ -475,57 +442,53 @@ assemble_system(const double dt)
                   grad_phi_w[k] = fe_values[w_extractor].gradient (k,q);
                 }
 
-              Point<spacedim> loc = fe_values.quadrature_point (q);
-              double emplacement = sill_emplacement_function.value(loc);
+              loc = fe_values.quadrature_point (q);
 
-              double h_bar, h_n, s_n;
-              Tensor<1,spacedim> grad_w_bar;
-              if (initialization_step) {
-                h_bar = h_0;
-                grad_w_bar *= 0;
-              } else {
-                h_bar = current_h_values[q];
-                grad_w_bar = current_w_gradients[q];
-              }
+              D = rigidity_field.value(loc);
+              eta = viscosity_field.value(loc);
 
-              if (crustal_flow_time == 0)
+              if (initialization_step || crustal_flow_time == 0)
                 {
-                  h_n = h_0;
-                  s_n = sill_thickness_function.value(loc);
+                  h_bar = h_n = initial_crustal_thickness_field.value(loc);
+                  s_n = initial_sill_thickness_field.value(loc);
+                  grad_w_bar *= 0;
                 }
-              else
+
+              if (!initialization_step)
+                {
+                  h_bar = current_h_values[q];
+                  grad_w_bar = current_w_gradients[q];
+                }
+
+              if (crustal_flow_time > 0)
                 {
                   h_n = old_h_values[q];
                   s_n = old_s_values[q];
                 }
 
-
               s_n = std::max(0.0, s_n);
 
-              double sigma = (rho_s-rho_c)*gravity*s_n;
-
-              if (unit_testing)
+              if (this->use_prescribed_overburden)
                 {
-                  const double omega = test_perturbation_freq*dealii::numbers::PI/model_width;
-                  const double X = loc[0];
-                  sigma = -(0.7 + (0.1*(std::pow(omega,4.0) + 1)*std::sin(omega*X)));
-                  //grad_w_bar[0] = 0.1*omega*std::cos(omega*X);
-                  //emplacement = 0;
-                  eta = 1.0;
-                  D = 1.0;
-                  rho_c = 0.85;
-                  rho_m = 1.0;
-                  //s_n = 0;
-                  //h_n = h_0;
-                  //h_bar = h_0;
-                  gravity = 1.0;
+                  sigma = prescribed_overburden_field.value(loc);
+                }
+              // else if (unit_testing)
+              //   { const double omega = test_perturbation_freq*dealii::numbers::PI/model_width;
+              //     const double X = loc[0];
+              //     sigma = -(0.7 + (0.1*(std::pow(omega,4.0) + 1)*std::sin(omega*X)));
+              //     //grad_w_bar[0] = 0.1*omega*std::cos(omega*X);
+              //     eta = 1.0; D = 1.0; rho_c = 0.85; rho_m = 1.0; gravity = 1.0; }
+              else
+                {
+                  sigma = (rho_s-rho_c)*gravity*s_n;
+                  emplacement = sill_emplacement_field.value(loc);
                 }
 
               for (unsigned int i = 0; i < dofs_per_cell; ++i)
                 {
                   for (unsigned int j = 0; j < dofs_per_cell; ++j)
                     {
-                      cell_matrix (i, j) += (// eta grad^2 U - 2*eta/(gamma*h)^2
+                      cell_matrix (i, j) += (//  eta grad^2 U - 2*eta/(gamma*h)^2
                                              // -eta*(grad_phi_u[i],grad_phi_u[j]) - (...)*phi_u[i]*phi_u[j]
                                               - eta * h_bar * scalar_product(grad_phi_u[i], grad_phi_u[j])
                                                 - ( 2.0 * eta / (gamma * h_bar)
@@ -578,7 +541,7 @@ assemble_system(const double dt)
                                       * (2 * (rho_m - rho_c) * h_bar / rho_m
                                         - sigma / (rho_m * gravity))
 
-                                    // + phi_w[i] * 0.0
+                                    // 0 * phi_w[i]
 
                                     // phi_s[i] * (s_n + dt * ds/dt)
                                     + phi_s[i] * std::max(0.0, s_n + dt*emplacement)
@@ -597,39 +560,53 @@ assemble_system(const double dt)
   }
 
 template <int spacedim>
-double
+std::pair<double, double>
 CrustalFlow<spacedim>::
-picard_residual (const LA::MPI::Vector &distributed_solution,
-                 const FEValuesExtractors::Scalar extractor,
-                 const unsigned int degree)
+picard_residuals (const TrilinosWrappers::MPI::Vector &old_solution,
+                  const TrilinosWrappers::MPI::Vector &new_solution)
   {
-    double local_residual_integral = 0.0;
-    const QGauss<dim> quadrature_formula (degree); //(flexure_degree+1);
+    const QGauss<dim> quadrature_formula (this->flexure_degree+1);
     FEValues<dim,spacedim> fe_values (mapping, fe, quadrature_formula,
                                       update_values | update_JxW_values);
-    const unsigned int n_q_points = quadrature_formula.size ();
+    const unsigned int n_q_points = quadrature_formula.size();
 
-    std::vector<double> previous_values(n_q_points);
-    std::vector<double> current_values(n_q_points);
+    std::vector<double> previous_h_values(n_q_points);
+    std::vector<double> current_h_values(n_q_points);
+    std::vector<double> previous_w_values(n_q_points);
+    std::vector<double> current_w_values(n_q_points);
+
+    double local_h_residual_integral = 0.0;
+    double local_w_residual_integral = 0.0;
 
     // compute the integral quantities by quadrature
-    typename DoFHandler<dim,spacedim>::active_cell_iterator cell =
-      dof_handler.begin_active(), endc = dof_handler.end();
-    for (; cell != endc; ++cell)
+    for (const auto &cell : dof_handler.active_cell_iterators())
       if (cell->is_locally_owned())
         {
           fe_values.reinit (cell);
-          fe_values[extractor].get_function_values (locally_relevant_solution, previous_values);
-          fe_values[extractor].get_function_values (distributed_solution, current_values);;
+          fe_values[this->h_extractor].get_function_values (old_solution, previous_h_values);
+          fe_values[this->h_extractor].get_function_values (new_solution, current_h_values);
 
-          for (unsigned int q=0; q<n_q_points; ++q) {
-            const double q_residual = std::pow(current_values[q] - previous_values[q], 2);
-            local_residual_integral += q_residual*fe_values.JxW(q);
-          }
+          fe_values[this->w_extractor].get_function_values (old_solution, previous_w_values);
+          fe_values[this->w_extractor].get_function_values (new_solution, current_w_values);
+
+          double w_q_residual, h_q_residual;
+          for (unsigned int q=0; q<n_q_points; ++q)
+            {
+              h_q_residual = std::pow(current_h_values[q] - previous_h_values[q], 2);
+              local_h_residual_integral += h_q_residual*fe_values.JxW(q);
+
+              w_q_residual = std::pow(current_w_values[q] - previous_w_values[q], 2);
+              local_w_residual_integral += w_q_residual*fe_values.JxW(q);
+            }
         }
+
     // compute the sum over all processors
-    return std::sqrt(Utilities::MPI::sum (local_residual_integral,
-                                          MPI_COMM));
+    const double global_h_residual
+      = std::sqrt(Utilities::MPI::sum (local_h_residual_integral, MPI_COMM));
+    const double global_w_residual
+      = std::sqrt(Utilities::MPI::sum (local_w_residual_integral, MPI_COMM));
+
+    return std::make_pair(global_h_residual, global_w_residual);
   }
 
 template <int spacedim>
@@ -640,28 +617,30 @@ solve_direct ()
     TimerOutput::Scope timing_section (computing_timer, "Direct solver");
     pcout << "  Solving direct..." << std::flush;
 
-    LA::MPI::Vector distributed_solution (locally_owned_dofs,
-                                          MPI_COMM);
+    TrilinosWrappers::MPI::Vector fully_distributed_solution (locally_owned_dofs, MPI_COMM);
+
     SolverControl sc;
     TrilinosWrappers::SolverDirect direct_solver (sc);
     try
       {
-        direct_solver.solve (system_matrix, distributed_solution, rhs);
-        constraints.distribute (distributed_solution);
+        direct_solver.solve (system_matrix, fully_distributed_solution, rhs);
+        constraints.distribute (fully_distributed_solution);
 
-        const double h_residual = picard_residual(distributed_solution,
-                                                  h_extractor, h_degree+1);
-        const double w_residual = picard_residual(distributed_solution,
-                                                  w_extractor, flexure_degree+1);
+        tmp_locally_relevant_solution = fully_distributed_solution;
+        const std::pair<double, double> residuals
+          = picard_residuals(locally_relevant_solution,
+                             tmp_locally_relevant_solution);
+        const double h_residual = residuals.first,
+                     w_residual = residuals.second;
 
         const double residual_norm = (h_residual+w_residual)/(std::pow(model_width,spacedim-1));
 
-        if (residual_norm <= picard_tolerance) {
+        if (residual_norm <= picard_tolerance)
           old_locally_relevant_solution = locally_relevant_solution;
-        }
-        locally_relevant_solution = distributed_solution;
+
+        locally_relevant_solution = fully_distributed_solution;
         pcout << " OK" << std::endl;
-        return std::make_pair(h_residual, w_residual);
+        return residuals;
       }
     catch (const std::exception &exc)
       {
@@ -689,35 +668,39 @@ solve_iterative ()
     pcout << "  Solving system..." << std::flush;
 
     // pcout << "Solving with CG" << std::endl;
-    LA::MPI::Vector distributed_solution (locally_owned_dofs,
-                                          MPI_COMM);
+    TrilinosWrappers::MPI::Vector fully_distributed_solution (locally_owned_dofs, MPI_COMM);
+
     const double tolerance = solver_relative_tolerance * rhs.l2_norm();
     SolverControl sc (dof_handler.n_dofs(), tolerance);
-    SolverCG<LA::MPI::Vector> iterative_solver (sc);
+    SolverCG<TrilinosWrappers::MPI::Vector> iterative_solver (sc);
 
-    LA::MPI::PreconditionILU preconditioner;
-    LA::MPI::PreconditionILU::AdditionalData data;
+    TrilinosWrappers::PreconditionILU preconditioner;
+    TrilinosWrappers::PreconditionILU::AdditionalData data;
 
     try
       {
         preconditioner.initialize(system_matrix, data);
-        iterative_solver.solve(system_matrix, distributed_solution,
+        iterative_solver.solve(system_matrix, fully_distributed_solution,
                                rhs, preconditioner);
-        constraints.distribute (distributed_solution);
+        constraints.distribute (fully_distributed_solution);
 
-        const double h_residual = picard_residual(distributed_solution,
-                                                  h_extractor, h_degree+1);
-        const double w_residual = picard_residual(distributed_solution,
-                                                  w_extractor, flexure_degree+1);
+        // distributed_solution.compress(VectorOperation::add);
+
+        tmp_locally_relevant_solution = fully_distributed_solution;
+        const std::pair<double, double> residuals
+          = picard_residuals(locally_relevant_solution,
+                             tmp_locally_relevant_solution);
+        const double h_residual = residuals.first,
+                     w_residual = residuals.second;
 
         const double residual_norm = (h_residual+w_residual)/(std::pow(model_width,spacedim-1));
 
-        if (residual_norm <= picard_tolerance) {
+        if (residual_norm <= picard_tolerance)
           old_locally_relevant_solution = locally_relevant_solution;
-        }
-        locally_relevant_solution = distributed_solution;
+
+        locally_relevant_solution = fully_distributed_solution;
         pcout << " OK" << std::endl;
-        return std::make_pair(h_residual, w_residual);
+        return residuals;
       }
     catch (const std::exception &exc)
       {
@@ -744,9 +727,7 @@ get_dt(const double max_dt)
     std::vector<double> h_values (n_q_points);
     double max_local_cfl_cond = 0, max_local_rate, local_u, local_dhdt;
 
-    typename DoFHandler<dim,spacedim>::active_cell_iterator cell =
-      dof_handler.begin_active (), endc = dof_handler.end ();
-    for (; cell != endc; ++cell)
+    for (const auto &cell : dof_handler.active_cell_iterators())
       if (cell->is_locally_owned ())
         {
           fe_values.reinit (cell);
@@ -777,7 +758,7 @@ refine_mesh()
     pcout << "  Refining mesh..." << std::flush;
 
     parallel::distributed::SolutionTransfer<dim,
-             LA::MPI::Vector, DoFHandler<dim,spacedim>>
+             TrilinosWrappers::MPI::Vector, DoFHandler<dim,spacedim>>
              solutionTx (dof_handler);
 
     {
@@ -804,7 +785,7 @@ refine_mesh()
         cell->clear_coarsen_flag ();
 
       // Transfer solution onto new mesh
-      std::vector<const LA::MPI::Vector *> solution (2);
+      std::vector<const TrilinosWrappers::MPI::Vector *> solution (2);
       solution[0] = &locally_relevant_solution;
       solution[1] = &old_locally_relevant_solution;
       surface_mesh.prepare_coarsening_and_refinement ();
@@ -815,9 +796,9 @@ refine_mesh()
     setup_dofs ();
 
     {
-      LA::MPI::Vector distributed_solution (rhs);
-      LA::MPI::Vector old_distributed_solution (rhs);
-      std::vector<LA::MPI::Vector *> tmp (2);
+      TrilinosWrappers::MPI::Vector distributed_solution (rhs);
+      TrilinosWrappers::MPI::Vector old_distributed_solution (rhs);
+      std::vector<TrilinosWrappers::MPI::Vector *> tmp (2);
       tmp[0] = &(distributed_solution);
       tmp[1] = &(old_distributed_solution);
       solutionTx.interpolate (tmp);
@@ -854,14 +835,20 @@ output_results (const unsigned int timestep,
       data_component_interpretation.push_back(DataComponentInterpretation::component_is_scalar);
       data_component_interpretation.push_back(DataComponentInterpretation::component_is_scalar);
 
-      solution_name.push_back ("Crustal_Thickness");
-      solution_name.push_back ("Elastic_curvature");
-      solution_name.push_back ("Elastic_displacement");
-      solution_name.push_back ("Sill_Thickness");
+      solution_name.push_back ("Lower_crust_half_thickness");
+      solution_name.push_back ("Plate_curvature");
+      solution_name.push_back ("Plate_displacement");
+      solution_name.push_back ("Sill_thickness");
 
       data_out.add_data_vector (locally_relevant_solution, solution_name,
                                 DataOut<dim,DoFHandler<dim,spacedim>>::type_dof_data,
                                 data_component_interpretation);
+
+      const Postprocessor::StaticFunctionPostprocessor<spacedim>
+        overburden_vis ("Overburden", &(this->prescribed_overburden_field));
+
+      if (this->use_prescribed_overburden)
+        data_out.add_data_vector (locally_relevant_solution, overburden_vis);
 
       data_out.build_patches (mapping, mapping.get_degree());
       std::ofstream output (
@@ -870,21 +857,20 @@ output_results (const unsigned int timestep,
          + Utilities::int_to_string (surface_mesh.locally_owned_subdomain (), 4)
          + ".vtu").c_str ());
       data_out.write_vtu (output);
+
       if (Utilities::MPI::this_mpi_process(MPI_COMM) == 0)
         {
           std::vector<std::string> filenames;
-          for (unsigned int i = 0;
-               i < Utilities::MPI::n_mpi_processes (MPI_COMM);
-               ++i)
-            {
-              filenames.push_back ("crustal_flow-"
-                                   + Utilities::int_to_string (timestep, 5) + "."
-                                   + Utilities::int_to_string (i, 4) + ".vtu");
-            }
+          const unsigned int n_procs = Utilities::MPI::n_mpi_processes(MPI_COMM);
+          for (unsigned int i=0; i<n_procs; ++i)
+            filenames.push_back("crustal_flow-"
+                              + Utilities::int_to_string (timestep, 5) + "."
+                              + Utilities::int_to_string (i, 4) + ".vtu");
 
-          const std::string pvtu_master_filename =
-            "crustal_flow/crustal_flow-"
-            + Utilities::int_to_string (timestep, 4) + ".pvtu";
+          const std::string pvtu_master_filename = "crustal_flow/crustal_flow-"
+                                                 + Utilities::int_to_string (timestep, 4)
+                                                 + ".pvtu";
+
           std::ofstream pvtu_master (output_directory + "/" + pvtu_master_filename);
           data_out.write_pvtu_record (pvtu_master, filenames);
 
@@ -898,22 +884,27 @@ output_results (const unsigned int timestep,
     {
       std::ofstream output;
 
-      if (Utilities::MPI::this_mpi_process(MPI_COMM) == 0)
+      // const unsigned int this_mpi_process = Utilities::MPI::this_mpi_process(MPI_COMM);
+      // if (this_mpi_process == 0)
       {
-        std::string filename = vis_directory + "/crustal_flow."
-                             + Utilities::int_to_string(timestep, 4) + '.'
-                             + Utilities::to_string(time) + ".txt";
+        std::string filename = vis_directory + "/crustal_flow-"
+                             + Utilities::int_to_string(timestep, 4) + "."
+                             + Utilities::int_to_string (surface_mesh.locally_owned_subdomain (), 4)
+                             //+ Utilities::int_to_string(this_mpi_process, 4)
+                             + ".txt";
         output.open(filename.c_str());
 
         output.precision(10);
         output << std::scientific;
+
+        output << "# time (years): " << time << "\n";
         output << "# pos_x pos_y";
         if (spacedim == 3)
             output << " pos_z";
         output << " velocity_x velocity_y";
         if (spacedim == 3)
             output << " velocity_z";
-        output << " flexure crustal_thickness sill_thickness";
+        output << " plate_displacement crust_half_thickness sill_thickness";
         // if (unit_testing)
         //   output << " thickness_error";
         output << "\n";
@@ -929,9 +920,7 @@ output_results (const unsigned int timestep,
         std::vector<Tensor<1,spacedim>> u_values(n_q_points);
 
         // compute the integral quantities by quadrature
-        typename DoFHandler<dim,spacedim>::active_cell_iterator cell =
-          dof_handler.begin_active(), endc = dof_handler.end();
-        for (; cell != endc; ++cell)
+        for (const auto &cell : dof_handler.active_cell_iterators())
           if (cell->is_locally_owned())
             {
               fe_values.reinit (cell);
@@ -950,8 +939,6 @@ output_results (const unsigned int timestep,
                     output << " " << u_values[q][2];
                 output << " " << w_values[q] << " " << h_values[q]
                        << " " << s_values[q];
-                // if (unit_testing)
-                //     output << " " << h_values[q]-h_0-0.01/3.0*time*std::sin(test_perturbation_freq*dealii::numbers::PI*loc[0]/model_width);
                 output << "\n";
               }
             }
@@ -977,9 +964,7 @@ output_results (const unsigned int timestep,
     std::vector<Tensor<1,spacedim>> u_values(n_q_points);
 
     // compute the integral quantities by quadrature
-    typename DoFHandler<dim,spacedim>::active_cell_iterator cell =
-      dof_handler.begin_active(), endc = dof_handler.end();
-    for (; cell != endc; ++cell)
+    for (const auto &cell : dof_handler.active_cell_iterators())
       if (cell->is_locally_owned())
         {
           fe_values.reinit (cell);
@@ -994,6 +979,7 @@ output_results (const unsigned int timestep,
             const double omega = test_perturbation_freq*dealii::numbers::PI/model_width;
             const double exact_w = 0.1*std::sin(omega*X) + 1.0;
             const double exact_u = 0.015*(omega)/(omega*omega + 2)*std::cos(omega*X);
+            const double h_0 = initial_crustal_thickness_field.value(loc);
             const double exact_h = h_0 + crustal_flow_time * 2.0/3.0*h_0
                                           * 0.015*(omega*omega)/(omega*omega + 2)
                                           * std::sin(omega*X);
@@ -1045,6 +1031,10 @@ run ()
     initialization_step = true;
     vis_timestep = 0;
 
+    this-> initial_crustal_thickness_field.set_model_width(model_width);
+    this-> topographic_boundary_value_field.set_model_width(model_width);
+    this-> prescribed_overburden_field.set_model_width(model_width);
+
     GridGenerator::hyper_cube(surface_mesh, 0, model_width, false);
     surface_mesh.refine_global(initial_refinement);
     setup_dofs ();
@@ -1064,13 +1054,13 @@ run ()
           }
 
         assemble_system(0);
-        use_direct_solver ? solve_direct() : solve_iterative();
+        this->use_direct_solver ? solve_direct() : solve_iterative();
         refine_mesh ();
       }
 
       assemble_system(0);
-      use_direct_solver ? solve_direct() : solve_iterative();
-      initialization_step = false;
+      this->use_direct_solver ? solve_direct() : solve_iterative();
+      this->initialization_step = false;
 
       output_results(vis_timestep++, 0);
 
@@ -1083,10 +1073,10 @@ run ()
           const double dt = get_dt(max_dt);
 
           {
-            viscosity_function.set_time(crustal_flow_time);
-            rigidity_function.set_time(crustal_flow_time);
-            sill_emplacement_function.set_time(crustal_flow_time);
-            sill_thickness_function.set_time(crustal_flow_time);
+            viscosity_field.set_time(crustal_flow_time);
+            rigidity_field.set_time(crustal_flow_time);
+            sill_emplacement_field.set_time(crustal_flow_time);
+            initial_sill_thickness_field.set_time(crustal_flow_time);
           }
 
           double residual_norm;

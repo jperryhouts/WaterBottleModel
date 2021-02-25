@@ -1,47 +1,102 @@
 set Dimension = 3
 set Output directory = output
-set End time         = 3.15e14
-set Maximum time step = 3.15e12
 
 set Output format = vtu
 set Visualization frequency = 1
 
-set Initial refinement = 6
-set Maximum refinement = 6
-set Minimum refinement = 6
-
-set CFL = 1.0
-set Use direct solver = false
-set Linear solver tolerance = 1e-12
-set Picard tolerance = 1e-12
+set Initial refinement = 5
+set Maximum refinement = 5
+set Minimum refinement = 5
 
 set Pi = 1.0
 set gamma = 1.0
 
-set L = 1000e3
+## CFL controls how far the model is allowed
+## to timestep, based on the maximum ratio of
+## fluid flow velocity vs mesh cell size.
+## Conceptually, CFL of 1.0 means that a
+## hypothetical particle somewhere in the model
+## could move all the way across whatever cell
+## it started in.
+set CFL = 1.0
+set Use direct solver = false
+set Linear solver tolerance = 1e-12
+set Picard tolerance = 1e-12
+set Max nonlinear iterations = 10
+
+set Model width = 1000e3
 set Gravity = 9.8
 set Density of mantle = 3300
 set Density of crust = 2670
-set Density of overburden = 2880
-set Initial crustal thickness = 5e3
 
-subsection Sill thickness function
-  set Variable names = x, y, z, t
-  #set Function constants = P0=32e6, L0=25e3, eps0=3e-11, eta0=1e18
-  set Function constants = v=0.1, dsdt = 0.002, smoother=15e3
-  set Function expression = (5e3*2500/(2880-2675) + 17e3) * min(1.0, erfc((sqrt((x-v*t/3.15e7-50e3-smoother)^2+(y-500e3)^2)-50e3)/smoother)/2 + erfc((sqrt((y-500e3)^2)-50e3)/smoother)*erfc((x-v*t/3.15e7-50e3-smoother)/smoother)*erfc((smoother-x)/smoother)*erfc((x-1e6+smoother)/smoother)/16)
-end
-subsection Rigidity function
-  set Function expression = 7e10*12e3^3 / (12 * (1.0 - 0.25^2))
+subsection Initial crustal thickness
+  set Source = constant
+  set Constant = 1e3
+  subsection Ascii
+    set Data file = initial_crustal_thickness.txt
+  end
 end
 
-subsection Crustal viscosity function
-  set Function expression = 1e20
+set Use prescribed overburden = true
+subsection Prescribed overburden
+  set Source = ascii
+  subsection Ascii
+    set Data file = overburden.txt
+  end
+#  subsection Function
+#    set Function constants = v=0.03, dsdt = 0.002, smoother=15e3, rho_s=2880, rho_c=2670, g=9.8
+#    set Function expression = (rho_s-rho_c) * g * \
+#        ((5e3*2500/(2880-2675) + 17e3) * min(1.0, erfc((sqrt((x-v*t/3.15e7-50e3-smoother)^2 + \
+#        (y-500e3)^2)-50e3)/smoother)/2 + erfc((sqrt((y-500e3)^2)-50e3)/smoother) * \
+#        erfc((x-v*t/3.15e7-50e3-smoother)/smoother)*erfc((smoother-x)/smoother) * \
+#        erfc((x-1e6+smoother)/smoother)/16))
+#  end
 end
 
-subsection Sill emplacement function
-  set Variable names = x, y, z, t
-  set Function constants = v=0.1, dsdt = 0.002, P0 = 32e6, h0=1e3, L0 = 25e3, eps0=3e-11, eta0=1e18
-  set Function expression = 0
-  # if (t<2e6*3.15e7*eps0, dsdt/3.15e7/(h0*eps0) * erfc((((x-1000e3/L0)^2)-(50e3/L0)^2)/(50e3/L0))/2, 0)
+subsection Topographic boundary conditions
+  set Source = constant
+  set Constant = 0.0
 end
+
+subsection Rigidity
+  set Source = function
+  subsection Function
+    set Function expression = 7e10*12e3^3 / (12 * (1.0 - 0.25^2))
+  end
+end
+
+subsection Viscosity
+  set Source = function
+  subsection Function
+    set Function expression = 1e20
+  end
+end
+
+subsection Initial sill thickness
+  set Source = constant
+  set Constant = 0
+end
+
+
+# set Density of overburden = 2880
+
+# subsection Initial sill thickness function
+#   set Variable names = x, y, z, t
+#   #set Function constants = P0=32e6, L0=25e3, eps0=3e-11, eta0=1e18
+#   set Function expression = (5e3*2500/(2880-2675) + 17e3) *erfc(((x-500e3)^2+(y-500e3)^2-100e3^2)/75e3^2)/2
+# end
+
+# subsection Initial sill emplacement function
+#   set Variable names = x, y, z, t
+#   set Function constants = v=0.1, dsdt = 0.002, P0 = 32e6, h0=1e3, L0 = 25e3, eps0=3e-11, eta0=1e18
+#   set Function expression = 0
+#   # if (t<2e6*3.15e7*eps0, dsdt/3.15e7/(h0*eps0) * erfc((((x-1000e3/L0)^2)-(50e3/L0)^2)/(50e3/L0))/2, 0)
+# end
+
+# subsection Sill emplacement function
+#   set Variable names = x, y, z, t
+#   set Function constants = v=0.1, dsdt = 0.002, P0 = 32e6, h0=1e3, L0 = 25e3, eps0=3e-11, eta0=1e18
+#   set Function expression = 0
+#   # if (t<2e6*3.15e7*eps0, dsdt/3.15e7/(h0*eps0) * erfc((((x-1000e3/L0)^2)-(50e3/L0)^2)/(50e3/L0))/2, 0)
+# end
+

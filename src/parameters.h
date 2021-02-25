@@ -15,15 +15,13 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "model.h"
+#include "field_initializer.h"
 
 #include <deal.II/base/utilities.h>
 #include <deal.II/base/mpi.h>
 #include <deal.II/base/parameter_handler.h>
 #include <csignal>
 #include <string>
-
-std::string
-read_until_end (std::istream &input);
 
 std::string
 get_last_value_of_parameter(const std::string &parameters,

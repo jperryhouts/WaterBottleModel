@@ -14,6 +14,31 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+#include "ascii_utils.h"
+#include "field_initializer.h"
+#include "model.h"
+#include "parameters.h"
+
+#include <deal.II/base/utilities.h>
+#include <deal.II/base/mpi.h>
+#include <deal.II/base/multithread_info.h>
+#include <deal.II/base/revision.h>
+
+inline
+void
+MPIAssertThrow(const bool condition,
+               const std::string &msg)
+  {
+    if (Utilities::MPI::this_mpi_process(MPI_COMM_WORLD) == 0)
+      {
+        AssertThrow(condition, ExcMessage(msg));
+      }
+    else
+      {
+        QuietException();
+      }
+  }
+
 inline
 std::string
 get_timestamp ()
@@ -35,6 +60,21 @@ file_exists(const std::string &fname)
   struct stat buffer;
   return (stat (fname.c_str(), &buffer) == 0);
 }
+
+// inline
+// std::string
+// read_until_end (std::istream &input)
+// {
+//   std::string result;
+//   while (input)
+//     {
+//       std::string line;
+//       std::getline(input, line);
+
+//       result += line + '\n';
+//     }
+//   return result;
+// }
 
 inline
 int
@@ -73,9 +113,12 @@ print_help ()
   {
     std::cout << "\nUsage: ./wbm [args] <parameter_file.prm>\n\n"
               << "    optional arguments [args]:\n"
-              << "        -h, --help            (show this message and exit)\n"
-              << "        -l, --license         (show information about modifying\n"
+              << "        -h, --help            (Show this message and exit)\n"
+              << "        -l, --license         (Show information about modifying\n"
               << "                               and redistributing this code)\n"
+              << "        --end-time TIME       (Time at which to terminate model)\n"
+              << "        --length LENGTH       (Size of the model domain)\n"
+              << "        --refinement LEVEL    (Refinement level of the mesh)\n"
               << std::endl;
   }
 
@@ -83,7 +126,7 @@ inline
 void
 print_license ()
   {
-    std::cout << "\nCopyright (C) 2020 Jonathan Perry-Houts\n\n"
+    std::cout << "\nCopyright (C) 2020-2021 Jonathan Perry-Houts\n\n"
               << "This program is free software: you can redistribute it and/or modify\n"
               << "it under the terms of the GNU General Public License as published by\n"
               << "the Free Software Foundation, either version 3 of the License, or\n"

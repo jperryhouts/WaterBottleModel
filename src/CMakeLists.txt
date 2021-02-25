@@ -4,7 +4,7 @@
 
 SET(TARGET "wbm")
 #SET(LIB_SRC model.cc)# bindings.cc)
-SET(EXE_SRC model.cc parameters.cc main.cc)
+SET(EXE_SRC ascii_utils.cc field_initializer.cc postprocess_vis.cc model.cc parameters.cc main.cc)
 
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8.12)
 
