@@ -1,0 +1,16 @@
+Bootstrap: docker
+From: tjhei/dealii:v9.2.0-full-v9.2.0-r2-gcc5
+
+# Example usage:
+##   mkdir build ; cd build
+##   ../utils.sif compile ../src/
+##   ../utils.sif exec ./wbm ../examples/waterbottlemodel.prm
+
+# To rebuild this singularity image:
+##   sudo singularity build utils.sif utils.def
+
+%files
+    exec.sh /usr/local/bin
+
+%runscript
+    exec /usr/local/bin/exec.sh "${@}"
