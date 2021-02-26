@@ -168,17 +168,14 @@ declare_parameters (dealii::ParameterHandler &prm)
     // Model setup parameters
     //
 
-    prm.declare_entry ("Dimension", "2", Patterns::Integer(0),
-                       "Override with --dimension flag.");
+    prm.declare_entry ("Dimension", "2", Patterns::Integer(0), "");
 
-    prm.declare_entry ("End time", "1e10", Patterns::Double(0),
-                       "Override with --end-time flag.");
+    prm.declare_entry ("End time", "1e10", Patterns::Double(0), "Measured in seconds.");
     prm.declare_entry ("Maximum time step", "1e10", Patterns::Double(0), "");
 
     prm.declare_entry ("Model width", "1.0", Patterns::Double(0), "");
 
-    prm.declare_entry ("Initial refinement", "4", Patterns::Integer(0),
-                       "Override with --refinement flag.");
+    prm.declare_entry ("Initial refinement", "4", Patterns::Integer(0), "");
     prm.declare_entry ("Minimum refinement", "3", Patterns::Integer(0), "");
     prm.declare_entry ("Maximum refinement", "6", Patterns::Integer(0), "");
 

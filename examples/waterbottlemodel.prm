@@ -1,7 +1,10 @@
 set Dimension = 3
 set Output directory = output
 
-set Output format = vtu
+## Measured in seconds
+set End time = 3.15e10
+
+set Output format = ascii
 set Visualization frequency = 1
 
 set Initial refinement = 5
